@@ -1,0 +1,63 @@
+const ServiceBooking = require('../models/ServiceBooking');
+
+// @desc  Create booking
+// @route POST /api/services
+const createBooking = async (req, res) => {
+  const booking = await ServiceBooking.create({ user: req.user._id, ...req.body });
+  const io = req.app.get('io');
+  io.to(req.user._id.toString()).emit('booking_created', { bookingId: booking._id });
+  res.status(201).json(booking);
+};
+
+// @desc  Get user bookings
+// @route GET /api/services/my
+const getMyBookings = async (req, res) => {
+  const bookings = await ServiceBooking.find({ user: req.user._id }).sort({ createdAt: -1 });
+  res.json(bookings);
+};
+
+// @desc  Get single booking
+// @route GET /api/services/:id
+const getBooking = async (req, res) => {
+  const booking = await ServiceBooking.findById(req.params.id).populate('user', 'name email phone');
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+  if (booking.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin')
+    return res.status(403).json({ message: 'Not authorized' });
+  res.json(booking);
+};
+
+// @desc  Update booking status (admin)
+// @route PUT /api/services/:id/status
+const updateBookingStatus = async (req, res) => {
+  const booking = await ServiceBooking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+  booking.status = req.body.status || booking.status;
+  booking.technicianNotes = req.body.technicianNotes || booking.technicianNotes;
+  booking.estimatedCost = req.body.estimatedCost || booking.estimatedCost;
+  booking.finalCost = req.body.finalCost || booking.finalCost;
+  if (req.body.status === 'completed') booking.completedAt = Date.now();
+  const updated = await booking.save();
+  const io = req.app.get('io');
+  io.to(booking.user.toString()).emit('service_status_update', { bookingId: booking._id, status: booking.status });
+  res.json(updated);
+};
+
+// @desc  Cancel booking
+// @route PUT /api/services/:id/cancel
+const cancelBooking = async (req, res) => {
+  const booking = await ServiceBooking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+  if (booking.user.toString() !== req.user._id.toString()) return res.status(403).json({ message: 'Not authorized' });
+  booking.status = 'cancelled';
+  await booking.save();
+  res.json({ message: 'Booking cancelled' });
+};
+
+// @desc  Get all bookings (admin)
+// @route GET /api/services
+const getAllBookings = async (req, res) => {
+  const bookings = await ServiceBooking.find({}).populate('user', 'name email phone').sort({ createdAt: -1 });
+  res.json(bookings);
+};
+
+module.exports = { createBooking, getMyBookings, getBooking, updateBookingStatus, cancelBooking, getAllBookings };
